@@ -1,11 +1,5 @@
-// ==========================================
-// 1. الإعدادات الأساسية لوكيل الأوردرات (ai provider)
-// ==========================================
-const GEMINI_API_KEY = "AQ.Ab8RN6LJOBV2bsfAEslirCrj7k3ylALJCsFBmL3w4IJnL5TPnA";
 const MODEL_NAME = "gemini-2.0-flash";
-const MAX_FREE_QUESTIONS = 3;
 const WHATSAPP_NUMBER = "970567375571";
-const ACTIVATION_CODE = "AIPR-PRO";
 
 const PRODUCTS_AND_POLICY = `
 - الصنف 1: قهوة مختارة — السعر: حسب الاختيار والوزن المعتمد عند تأكيد الطلب — الميزة: نكهة غنية وقوام متوازن مناسب للتحضير اليومي والضيافة.
@@ -40,171 +34,103 @@ const SYSTEM_PROMPT = `
 ${PRODUCTS_AND_POLICY}
 `.trim();
 
-// ==========================================
-// 2. إدارة حد الـ 3 أسئلة المجانية
-// ==========================================
-const COUNT_KEY = "aipr_order_agent_count";
-const UNLOCK_KEY = "aipr_order_agent_unlocked";
-
-let usedQuestions = parseInt(localStorage.getItem(COUNT_KEY) || "0", 10);
-let isUnlocked = localStorage.getItem(UNLOCK_KEY) === "true";
-const conversationHistory = [];
-
-const chatBox = document.getElementById("chatBox");
-const chatForm = document.getElementById("chatForm");
-const userInput = document.getElementById("userInput");
-const sendBtn = document.getElementById("sendBtn");
-const quotaBadge = document.getElementById("quotaBadge");
-const resetQuotaBtn = document.getElementById("resetQuotaBtn");
-
-function updateBadge() {
-  if (isUnlocked) {
-    quotaBadge.textContent = "مفتوح (مفعل)";
-    return;
-  }
-  const remaining = Math.max(0, MAX_FREE_QUESTIONS - usedQuestions);
-  quotaBadge.textContent = `المتبقي: ${remaining} / ${MAX_FREE_QUESTIONS}`;
+function jsonResponse(statusCode, payload) {
+  return {
+    statusCode,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Allow-Methods": "POST, OPTIONS"
+    },
+    body: JSON.stringify(payload)
+  };
 }
 
-function appendMessage(text, role = "bot", waLink = null) {
-  const div = document.createElement("div");
-  div.className = `msg ${role}`;
-  div.textContent = text;
-
-  if (waLink) {
-    const a = document.createElement("a");
-    a.href = waLink;
-    a.target = "_blank";
-    a.rel = "noopener noreferrer";
-    a.className = "wa-btn";
-    a.textContent = "التواصل عبر واتساب ai provider";
-    div.appendChild(document.createElement("br"));
-    div.appendChild(a);
+exports.handler = async (event) => {
+  if (event.httpMethod === "OPTIONS") {
+    return jsonResponse(200, { ok: true });
   }
 
-  chatBox.appendChild(div);
-  chatBox.scrollTop = chatBox.scrollHeight;
-}
-
-function getWhatsAppLimitLink() {
-  const msg = encodeURIComponent("مرحباً ai provider، جرّبت وكيل الأوردرات وأرغب بتفعيله أو الحصول على رمز التفعيل.");
-  return `https://wa.me/${WHATSAPP_NUMBER}?text=${msg}`;
-}
-
-async function askGemini(messageText) {
-  conversationHistory.push({
-    role: "user",
-    parts: [{ text: messageText }]
-  });
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      system_instruction: {
-        parts: [{ text: SYSTEM_PROMPT }]
-      },
-      contents: conversationHistory,
-      generationConfig: {
-        temperature: 0.4,
-        maxOutputTokens: 500
-      }
-    })
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`HTTP ${response.status}: ${errText}`);
+  if (event.httpMethod !== "POST") {
+    return jsonResponse(405, { error: "Method Not Allowed" });
   }
 
-  const data = await response.json();
-  const reply =
-    data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
-    "عذراً، لم أتمكن من صياغة الرد الآن. حاول مرة أخرى.";
-
-  conversationHistory.push({
-    role: "model",
-    parts: [{ text: reply }]
-  });
-
-  return reply;
-}
-
-// ==========================================
-// 3. معالجة الإرسال والاختبار المحلي
-// ==========================================
-chatForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const text = userInput.value.trim();
-  if (!text) return;
-
-  userInput.value = "";
-
-  // تفعيل النسخة عبر رمز التفعيل
-  if (text === ACTIVATION_CODE) {
-    isUnlocked = true;
-    localStorage.setItem(UNLOCK_KEY, "true");
-    updateBadge();
-    appendMessage(text, "user");
-    appendMessage("✅ تم تفعيل النسخة الكاملة بنجاح! يمكنك متابعة المحادثة الآن.", "system");
-    return;
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return jsonResponse(500, {
+      error: "GEMINI_API_KEY is not configured in environment variables."
+    });
   }
-
-  // التحقق من حد الـ 3 أسئلة المجانية
-  if (!isUnlocked && usedQuestions >= MAX_FREE_QUESTIONS) {
-    appendMessage(text, "user");
-    appendMessage(
-      "انتهت محاولات التجربة المجانية (3 أسئلة). لتفعيل وكيل الأوردرات الخاص بمتجرك أو طلب رمز التفعيل، تواصل معنا مباشرة عبر واتساب:",
-      "bot",
-      getWhatsAppLimitLink()
-    );
-    return;
-  }
-
-  appendMessage(text, "user");
-  usedQuestions += 1;
-  localStorage.setItem(COUNT_KEY, String(usedQuestions));
-  updateBadge();
-
-  sendBtn.disabled = true;
-  const loadingDiv = document.createElement("div");
-  loadingDiv.className = "msg bot";
-  loadingDiv.textContent = "جاري تجهيز الرد...";
-  chatBox.appendChild(loadingDiv);
-  chatBox.scrollTop = chatBox.scrollHeight;
 
   try {
-    const reply = await askGemini(text);
-    loadingDiv.remove();
-    appendMessage(reply, "bot");
+    const body = JSON.parse(event.body || "{}");
+    const message = typeof body.message === "string" ? body.message.trim() : "";
+    const history = Array.isArray(body.history) ? body.history : [];
 
-    if (!isUnlocked && usedQuestions >= MAX_FREE_QUESTIONS) {
-      appendMessage(
-        "هذه كانت آخر رسالة من التجربة المجانية (3 أسئلة). لإكمال التفعيل أو طلب رمز فتح التجربة تواصل معنا عبر واتساب:",
-        "system",
-        getWhatsAppLimitLink()
-      );
+    if (!message) {
+      return jsonResponse(400, { error: "Message is required." });
     }
+
+    const sanitizedHistory = history
+      .filter(
+        (item) =>
+          item &&
+          (item.role === "user" || item.role === "model") &&
+          Array.isArray(item.parts) &&
+          item.parts.length > 0 &&
+          typeof item.parts[0]?.text === "string"
+      )
+      .slice(-12)
+      .map((item) => ({
+        role: item.role,
+        parts: [{ text: item.parts[0].text.slice(0, 2000) }]
+      }));
+
+    const contents = [
+      ...sanitizedHistory,
+      {
+        role: "user",
+        parts: [{ text: message }]
+      }
+    ];
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+    const geminiRes = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        system_instruction: {
+          parts: [{ text: SYSTEM_PROMPT }]
+        },
+        contents,
+        generationConfig: {
+          temperature: 0.4,
+          maxOutputTokens: 500
+        }
+      })
+    });
+
+    const data = await geminiRes.json();
+
+    if (!geminiRes.ok) {
+      return jsonResponse(geminiRes.status, {
+        error: data?.error?.message || "Failed to fetch response from Gemini API."
+      });
+    }
+
+    const reply =
+      data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
+      "عذراً، لم أتمكن من صياغة الرد الآن. حاول مرة أخرى.";
+
+    return jsonResponse(200, {
+      reply,
+      whatsappNumber: WHATSAPP_NUMBER
+    });
   } catch (err) {
-    loadingDiv.remove();
-    appendMessage(`حدث خطأ أثناء الاتصال بالنموذج:\n${err.message}`, "bot");
-  } finally {
-    sendBtn.disabled = false;
-    userInput.focus();
+    return jsonResponse(500, {
+      error: err?.message || "Unexpected server error."
+    });
   }
-});
-
-// زر لتصفير العداد أثناء الاختبار المحلي فقط
-resetQuotaBtn.addEventListener("click", () => {
-  usedQuestions = 0;
-  isUnlocked = false;
-  localStorage.removeItem(COUNT_KEY);
-  localStorage.removeItem(UNLOCK_KEY);
-  conversationHistory.length = 0;
-  updateBadge();
-  appendMessage("🔄 تم تصفير عداد التجربة للاختبار من جديد.", "system");
-});
-
-updateBadge();
+};
